@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 
 import os
@@ -48,8 +48,8 @@ class Programa1(object):
      #The function takes 2 arguments, the password and the salt.
      #The password must be the same so the key is the same as well
     def decryption_key(self, password, salt):
-        encoded_password = password.encode()
-        salt = b64decode(salt)  #This encodes, to bytes, the password
+        encoded_password = password.encode()  #This encodes, to bytes, the password
+        salt = b64decode(salt) #Decodes the b64 value of salt to bytes
         kdf = PBKDF2HMAC(       #Key derivation Function(algorithm, lenght, salt, iterations, backend)
             algorithm=hashes.SHA256(),
             length=32,
@@ -90,26 +90,28 @@ class Programa1(object):
         decrypted = f.decrypt(encrypted_dict['cipher_text'].encode()).decode('utf-8')
         return decrypted
     
+'''
+PREGUNTAS:
+i. ¿Tuvo que usar “encode” de algo? ¿Sobre qué variables?
+    Sí, usamos encode en varias variables: 
+    1) password
+    2) key 
+    3) El mensaje en texto plano
+    4) El mensaje encriptado
+    5) La variable Salt (base64)
+ 
+ii. ¿Qué modo de AES usó? ¿Por qué?
+Referencias: https://stackoverflow.com/questions/1949640/does-iv-work-like-salt
+https://pycryptodome.readthedocs.io/en/latest/src/cipher/classic.html#cbc-mode
+    Se utilizó PBE (Password Base Encryption) con CBC (Ciphertext Block Chainin), ya que
+    se devuelve un iv (salt) y el texto encriptado, cuyos valores se utilizan par desencriptar,
+    tal y como se describe en el algoritmo CBC tradicional.
 
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-# p1 = Programa1()
-
-# plain_text = input('Enter the text you want to cypher: ')
-# password = input('Enter your password: ')
-
-# encrypted_message = p1.encrypt(password, plain_text)
-# print('Your encrypted messages is: ' + str(encrypted_message) + '\n')
-
-# password = input('Enter your password to decrypt: ')
-# decrypted_message = p1.decrypt(password, encrypted_message)
-# print('Your decrypted message is: ' + decrypted_message)
+iii. ¿Qué parámetros tuvo que hacer llegar desde su función de Encrypt a la Decrypt? ¿Por qué?
+      Devolví desde mi función Encrypt un diccionario con el texto cifrado y el "salt", ya 
+      que que salt es generado de forma aleatoria, era necesario mantener el mismo valor para que al hacer
+      el hash con el password obtuvieramos la misma key. El texto cifrado lógicamente era necesario para
+      poder desencriptarlo.
+'''
+    
 

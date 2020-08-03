@@ -1,11 +1,6 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
-
 import os
 import base64
+import sys
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -25,7 +20,7 @@ JUAN FERNANDO DE LEON
 '''
 
 #Part 2, exercise 1
-class Programa1(object):
+class TextCipher(object):
     
     #This method returns a tuple, which are the encryption key and the salt value.
     #The function takes 1 argument, the uncoded password written by the user
@@ -87,8 +82,14 @@ class Programa1(object):
         f = Fernet(key) #Same as described above
         #Fernet provides a decrypt function for encoded text, with the correct key. We also decoded for
         #usability pourposes
-        decrypted = f.decrypt(encrypted_dict['cipher_text'].encode()).decode('utf-8')
-        return decrypted
+        try:
+            decrypted = f.decrypt(encrypted_dict['cipher_text'].encode()).decode('utf-8')
+            return decrypted
+        except:
+            print('Wrong password provided')
+          
+            
+        
     
 '''
 PREGUNTAS:
@@ -105,13 +106,12 @@ Referencias: https://stackoverflow.com/questions/1949640/does-iv-work-like-salt
 https://pycryptodome.readthedocs.io/en/latest/src/cipher/classic.html#cbc-mode
     Se utilizó PBE (Password Base Encryption) con CBC (Ciphertext Block Chainin), ya que
     se devuelve un iv (salt) y el texto encriptado, cuyos valores se utilizan par desencriptar,
-    tal y como se describe en el algoritmo CBC tradicional.
+    tal y como se describe en el algoritmo CBC tradicional. Ya que se nos pedía un algoritmo que
+    implementara el uso de una contraseña, esté fue el modo utilizado.
 
 iii. ¿Qué parámetros tuvo que hacer llegar desde su función de Encrypt a la Decrypt? ¿Por qué?
       Devolví desde mi función Encrypt un diccionario con el texto cifrado y el "salt", ya 
-      que que salt es generado de forma aleatoria, era necesario mantener el mismo valor para que al hacer
+      que que Salt es generado de forma aleatoria, era necesario mantener el mismo valor para que al hacer
       el hash con el password obtuvieramos la misma key. El texto cifrado lógicamente era necesario para
       poder desencriptarlo.
 '''
-    
-

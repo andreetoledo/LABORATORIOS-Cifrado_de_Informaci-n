@@ -41,91 +41,250 @@
 
 
 """
-import hmac
-import hashlib
-from struct import Struct
-from operator import xor
-from itertools import izip, starmap
 
+__version__ = "1.3"
+__all__ = ['PBKDF2', 'crypt']
 
-_pack_int = Struct('>I').pack
+from struct import pack
+from random import randint
+import string
+import sys
 
+try:
+    # Use PyCrypto (if available).
+    from Crypto.Hash import HMAC, SHA as SHA1
+except ImportError:
+    # PyCrypto not available.  Use the Python standard library.
+    import hmac as HMAC
+    try:
+        from hashlib import sha1 as SHA1
+    except ImportError:
+        # hashlib not available.  Use the old sha module.
+        import sha as SHA1
 
-def pbkdf2_hex(data, salt, iterations=1000, keylen=24, hashfunc=None):
-    """Like :func:`pbkdf2_bin` but returns a hex encoded string."""
-    return pbkdf2_bin(data, salt, iterations, keylen, hashfunc).encode('hex')
+#
+# Python 2.1 thru 3.2 compatibility
+#
 
+if sys.version_info[0] == 2:
+    _0xffffffffL = long(1) << 32
+    def isunicode(s):
+        return isinstance(s, unicode)
+    def isbytes(s):
+        return isinstance(s, str)
+    def isinteger(n):
+        return isinstance(n, (int, long))
+    def b(s):
+        return s
+    def binxor(a, b):
+        return "".join([chr(ord(x) ^ ord(y)) for (x, y) in zip(a, b)])
+    def b64encode(data, chars="+/"):
+        tt = string.maketrans("+/", chars)
+        return data.encode('base64').replace("\n", "").translate(tt)
+    from binascii import b2a_hex
+else:
+    _0xffffffffL = 0xffffffff
+    def isunicode(s):
+        return isinstance(s, str)
+    def isbytes(s):
+        return isinstance(s, bytes)
+    def isinteger(n):
+        return isinstance(n, int)
+    def callable(obj):
+        return hasattr(obj, '__call__')
+    def b(s):
+       return s.encode("latin-1")
+    def binxor(a, b):
+        return bytes([x ^ y for (x, y) in zip(a, b)])
+    from base64 import b64encode as _b64encode
+    def b64encode(data, chars="+/"):
+        if isunicode(chars):
+            return _b64encode(data, chars.encode('utf-8')).decode('utf-8')
+        else:
+            return _b64encode(data, chars)
+    from binascii import b2a_hex as _b2a_hex
+    def b2a_hex(s):
+        return _b2a_hex(s).decode('us-ascii')
+    xrange = range
 
-def pbkdf2_bin(data, salt, iterations=1000, keylen=24, hashfunc=None):
-    """Returns a binary digest for the PBKDF2 hash algorithm of `data`
-    with the given `salt`.  It iterates `iterations` time and produces a
-    key of `keylen` bytes.  By default SHA-1 is used as hash function,
-    a different hashlib `hashfunc` can be provided.
+class PBKDF2(object):
+    """PBKDF2.py : PKCS#5 v2.0 Password-Based Key Derivation
+
+    This implementation takes a passphrase and a salt (and optionally an
+    iteration count, a digest module, and a MAC module) and provides a
+    file-like object from which an arbitrarily-sized key can be read.
+
+    If the passphrase and/or salt are unicode objects, they are encoded as
+    UTF-8 before they are processed.
+
+    The idea behind PBKDF2 is to derive a cryptographic key from a
+    passphrase and a salt.
+
+    PBKDF2 may also be used as a strong salted password hash.  The
+    'crypt' function is provided for that purpose.
+
+    Remember: Keys generated using PBKDF2 are only as strong as the
+    passphrases they are derived from.
     """
-    hashfunc = hashfunc or hashlib.sha1
-    mac = hmac.new(data, None, hashfunc)
-    def _pseudorandom(x, mac=mac):
-        h = mac.copy()
-        h.update(x)
-        return map(ord, h.digest())
-    buf = []
-    for block in xrange(1, -(-keylen // mac.digest_size) + 1):
-        rv = u = _pseudorandom(salt + _pack_int(block))
-        for i in xrange(iterations - 1):
-            u = _pseudorandom(''.join(map(chr, u)))
-            rv = starmap(xor, izip(rv, u))
-        buf.extend(rv)
-    return ''.join(map(chr, buf))[:keylen]
 
+    def __init__(self, passphrase, salt, iterations=1000,
+                 digestmodule=SHA1, macmodule=HMAC):
+        self.__macmodule = macmodule
+        self.__digestmodule = digestmodule
+        self._setup(passphrase, salt, iterations, self._pseudorandom)
 
-def test():
-    failed = []
-    def check(data, salt, iterations, keylen, expected):
-        rv = pbkdf2_hex(data, salt, iterations, keylen)
-        if rv != expected:
-            print 'Test failed:'
-            print '  Expected:   %s' % expected
-            print '  Got:        %s' % rv
-            print '  Parameters:'
-            print '    data=%s' % data
-            print '    salt=%s' % salt
-            print '    iterations=%d' % iterations
-            print
-            failed.append(1)
+    def _pseudorandom(self, key, msg):
+        """Pseudorandom function.  e.g. HMAC-SHA1"""
+        return self.__macmodule.new(key=key, msg=msg,
+            digestmod=self.__digestmodule).digest()
 
-    # From RFC 6070
-    check('password', 'salt', 1, 20,
-          '0c60c80f961f0e71f3a9b524af6012062fe037a6')
-    check('password', 'salt', 2, 20,
-          'ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957')
-    check('password', 'salt', 4096, 20,
-          '4b007901b765489abead49d926f721d065a429c1')
-    check('passwordPASSWORDpassword', 'saltSALTsaltSALTsaltSALTsaltSALTsalt',
-          4096, 25, '3d2eec4fe41c849b80c8d83662c0e44a8b291a964cf2f07038')
-    check('pass\x00word', 'sa\x00lt', 4096, 16,
-          '56fa6aa75548099dcc37d7f03425e0c3')
-    # This one is from the RFC but it just takes for ages
-    ##check('password', 'salt', 16777216, 20,
-    ##      'eefe3d61cd4da4e4e9945b3d6ba2158c2634e984')
+    def read(self, bytes):
+        """Read the specified number of key bytes."""
+        if self.closed:
+            raise ValueError("file-like object is closed")
 
-    # From Crypt-PBKDF2
-    check('password', 'ATHENA.MIT.EDUraeburn', 1, 16,
-          'cdedb5281bb2f801565a1122b2563515')
-    check('password', 'ATHENA.MIT.EDUraeburn', 1, 32,
-          'cdedb5281bb2f801565a1122b25635150ad1f7a04bb9f3a333ecc0e2e1f70837')
-    check('password', 'ATHENA.MIT.EDUraeburn', 2, 16,
-          '01dbee7f4a9e243e988b62c73cda935d')
-    check('password', 'ATHENA.MIT.EDUraeburn', 2, 32,
-          '01dbee7f4a9e243e988b62c73cda935da05378b93244ec8f48a99e61ad799d86')
-    check('password', 'ATHENA.MIT.EDUraeburn', 1200, 32,
-          '5c08eb61fdf71e4e4ec3cf6ba1f5512ba7e52ddbc5e5142f708a31e2e62b1e13')
-    check('X' * 64, 'pass phrase equals block size', 1200, 32,
-          '139c30c0966bc32ba55fdbf212530ac9c5ec59f1a452f5cc9ad940fea0598ed1')
-    check('X' * 65, 'pass phrase exceeds block size', 1200, 32,
-          '9ccad6d468770cd51b10e6a68721be611a8b4d282601db3b36be9246915ec82a')
+        size = len(self.__buf)
+        blocks = [self.__buf]
+        i = self.__blockNum
+        while size < bytes:
+            i += 1
+            if i > _0xffffffffL or i < 1:
+                # We could return "" here, but
+                raise OverflowError("derived key too long")
+            block = self.__f(i)
+            blocks.append(block)
+            size += len(block)
+        buf = b("").join(blocks)
+        retval = buf[:bytes]
+        self.__buf = buf[bytes:]
+        self.__blockNum = i
+        return retval
 
-    raise SystemExit(bool(failed))
+    def __f(self, i):
+        # i must fit within 32 bits
+        assert 1 <= i <= _0xffffffffL
+        U = self.__prf(self.__passphrase, self.__salt + pack("!L", i))
+        result = U
+        for j in xrange(2, 1+self.__iterations):
+            U = self.__prf(self.__passphrase, U)
+            result = binxor(result, U)
+        return result
 
+    def hexread(self, octets):
+        """Read the specified number of octets. Return them as hexadecimal.
 
-if __name__ == '__main__':
-    test()
+        Note that len(obj.hexread(n)) == 2*n.
+        """
+        return b2a_hex(self.read(octets))
+
+    def _setup(self, passphrase, salt, iterations, prf):
+        # Sanity checks:
+
+        # passphrase and salt must be str or unicode (in the latter
+        # case, we convert to UTF-8)
+        if isunicode(passphrase):
+            passphrase = passphrase.encode("UTF-8")
+        elif not isbytes(passphrase):
+            raise TypeError("passphrase must be str or unicode")
+        if isunicode(salt):
+            salt = salt.encode("UTF-8")
+        elif not isbytes(salt):
+            raise TypeError("salt must be str or unicode")
+
+        # iterations must be an integer >= 1
+        if not isinteger(iterations):
+            raise TypeError("iterations must be an integer")
+        if iterations < 1:
+            raise ValueError("iterations must be at least 1")
+
+        # prf must be callable
+        if not callable(prf):
+            raise TypeError("prf must be callable")
+
+        self.__passphrase = passphrase
+        self.__salt = salt
+        self.__iterations = iterations
+        self.__prf = prf
+        self.__blockNum = 0
+        self.__buf = b("")
+        self.closed = False
+
+    def close(self):
+        """Close the stream."""
+        if not self.closed:
+            del self.__passphrase
+            del self.__salt
+            del self.__iterations
+            del self.__prf
+            del self.__blockNum
+            del self.__buf
+            self.closed = True
+
+def crypt(word, salt=None, iterations=None):
+    """PBKDF2-based unix crypt(3) replacement.
+
+    The number of iterations specified in the salt overrides the 'iterations'
+    parameter.
+
+    The effective hash length is 192 bits.
+    """
+
+    # Generate a (pseudo-)random salt if the user hasn't provided one.
+    if salt is None:
+        salt = _makesalt()
+
+    # salt must be a string or the us-ascii subset of unicode
+    if isunicode(salt):
+        salt = salt.encode('us-ascii').decode('us-ascii')
+    elif isbytes(salt):
+        salt = salt.decode('us-ascii')
+    else:
+        raise TypeError("salt must be a string")
+
+    # word must be a string or unicode (in the latter case, we convert to UTF-8)
+    if isunicode(word):
+        word = word.encode("UTF-8")
+    elif not isbytes(word):
+        raise TypeError("word must be a string or unicode")
+
+    # Try to extract the real salt and iteration count from the salt
+    if salt.startswith("$p5k2$"):
+        (iterations, salt, dummy) = salt.split("$")[2:5]
+        if iterations == "":
+            iterations = 400
+        else:
+            converted = int(iterations, 16)
+            if iterations != "%x" % converted:  # lowercase hex, minimum digits
+                raise ValueError("Invalid salt")
+            iterations = converted
+            if not (iterations >= 1):
+                raise ValueError("Invalid salt")
+
+    # Make sure the salt matches the allowed character set
+    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./"
+    for ch in salt:
+        if ch not in allowed:
+            raise ValueError("Illegal character %r in salt" % (ch,))
+
+    if iterations is None or iterations == 400:
+        iterations = 400
+        salt = "$p5k2$$" + salt
+    else:
+        salt = "$p5k2$%x$%s" % (iterations, salt)
+    rawhash = PBKDF2(word, salt, iterations).read(24)
+    return salt + "$" + b64encode(rawhash, "./")
+
+# Add crypt as a static method of the PBKDF2 class
+# This makes it easier to do "from PBKDF2 import PBKDF2" and still use
+# crypt.
+PBKDF2.crypt = staticmethod(crypt)
+
+def _makesalt():
+    """Return a 48-bit pseudorandom salt for crypt().
+
+    This function is not suitable for generating cryptographic secrets.
+    """
+    binarysalt = b("").join([pack("@H", randint(0, 0xffff)) for i in range(3)])
+    return b64encode(binarysalt, "./")
+
+# vim:set ts=4 sw=4 sts=4 expandtab:
